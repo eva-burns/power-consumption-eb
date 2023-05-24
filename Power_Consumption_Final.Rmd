@@ -2,11 +2,11 @@
 title: "Power Consumption Exploration and Forecasting"
 author: "Eva Burns"
 date: "`r Sys.Date()`"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, dpi=200)
 ```
 
 ## Problem Statement
@@ -61,7 +61,7 @@ I hypothesize that a model with a seasonal component will be most appropriate. I
 ## Data properties
 
 ```{r properties-1}
-hist(train$PowerConsumption_Zone1)
+hist(train$PowerConsumption_Zone1, main = "Histogram of Power Consumption (Zone 1)", xlab = "PowerConsumption_Zone1")
 ```
 
 The distribution of the power consumption in Zone 1 does not seem to be normally distributed, but it looks to be somewhat symmetrical.
@@ -97,29 +97,8 @@ Let's look at how the other features of this dataset correlate to the power cons
 ```{r eda-3}
 cormat <- round(cor(power[c('PowerConsumption_Zone1', 'Temperature', 'Humidity', 'WindSpeed', 'GeneralDiffuseFlows', 'DiffuseFlows', 'PowerConsumption_Zone2', 'PowerConsumption_Zone3')]),2)
 
-# Get lower triangle of the correlation matrix
-get_lower_tri<-function(cormat){
-  cormat[upper.tri(cormat)] <- NA
-  return(cormat)
-}
-  # Get upper triangle of the correlation matrix
-get_upper_tri <- function(cormat){
-  cormat[lower.tri(cormat)]<- NA
-  return(cormat)
-}
-
-reorder_cormat <- function(cormat){
-# Use correlation between variables as distance
-dd <- as.dist((1-cormat)/2)
-hc <- hclust(dd)
-cormat <-cormat[hc$order, hc$order]
-}
-
-# Reorder the correlation matrix
-cormat <- reorder_cormat(cormat)
-upper_tri <- cormat
 # Melt the correlation matrix
-melted_cormat <- melt(upper_tri, na.rm = TRUE)
+melted_cormat <- melt(cormat, na.rm = TRUE)
 # Create a ggheatmap
 ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
  geom_tile(color = "white")+
@@ -150,8 +129,8 @@ theme(
 The power consumption in Zones 2 and 3 are the most correlated with power consumption in Zones 1. This makes sense because they are measuring the same thing in a area close to each other. They are visualized below.
 
 ```{r eda-4}
-plot(power$Datetime,power$PowerConsumption_Zone2, type='l')
-plot(power$Datetime,power$PowerConsumption_Zone3, type='l')
+plot(power$Datetime,power$PowerConsumption_Zone2, type='l', xlab="Month", ylab = "Power Consumption (Zone 2)")
+plot(power$Datetime,power$PowerConsumption_Zone3, type='l', xlab="Month", ylab = "Power Consumption (Zone 3)")
 ```
 
 ## Data processing
@@ -192,9 +171,7 @@ The periodogram says the seasonality with the highest frequency is `r seasonalit
 
 For this project, I will try two different models: TBATS and SARIMA. I will discuss how I chose these two models.
 
-
-
-```{r tbats}
+```{r tbats, warning=FALSE}
 if (file.exists("tbats.rds")) {
   model <- readRDS("tbats.rds")
 } else {
@@ -207,12 +184,14 @@ model
 fc <- forecast(model, h=nrow(test))
 comp <- tbats.components(model)
 
+plot(comp)
+
 power %>%
   ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted")) + 
   coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
@@ -222,17 +201,15 @@ test %>%
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted"))
-
-plot(comp)
 
 acc <- data.frame(accuracy(fc, test$PowerConsumption_Zone1)[2,1:5])
 accuracy(fc, test$PowerConsumption_Zone1)
 ```
 
-```{r sarima}
+```{r sarima, warning=FALSE}
 train_ts <- ts(train$PowerConsumption_Zone1, frequency = 144)
 
 if (file.exists("sarima.rds")) {
@@ -251,7 +228,7 @@ power %>%
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted")) + 
   coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
@@ -261,7 +238,7 @@ test %>%
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted"))
 

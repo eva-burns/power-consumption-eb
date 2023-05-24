@@ -92,7 +92,7 @@ yearly seasonality will not be able to be used.
 ## Data properties
 
 ``` r
-hist(train$PowerConsumption_Zone1)
+hist(train$PowerConsumption_Zone1, main = "Histogram of Power Consumption (Zone 1)", xlab = "PowerConsumption_Zone1")
 ```
 
 ![](Power_Consumption_Final_files/figure-gfm/properties-1-1.png)<!-- -->
@@ -167,29 +167,8 @@ power consumption in Zone 1.
 ``` r
 cormat <- round(cor(power[c('PowerConsumption_Zone1', 'Temperature', 'Humidity', 'WindSpeed', 'GeneralDiffuseFlows', 'DiffuseFlows', 'PowerConsumption_Zone2', 'PowerConsumption_Zone3')]),2)
 
-# Get lower triangle of the correlation matrix
-get_lower_tri<-function(cormat){
-  cormat[upper.tri(cormat)] <- NA
-  return(cormat)
-}
-  # Get upper triangle of the correlation matrix
-get_upper_tri <- function(cormat){
-  cormat[lower.tri(cormat)]<- NA
-  return(cormat)
-}
-
-reorder_cormat <- function(cormat){
-# Use correlation between variables as distance
-dd <- as.dist((1-cormat)/2)
-hc <- hclust(dd)
-cormat <-cormat[hc$order, hc$order]
-}
-
-# Reorder the correlation matrix
-cormat <- reorder_cormat(cormat)
-upper_tri <- cormat
 # Melt the correlation matrix
-melted_cormat <- melt(upper_tri, na.rm = TRUE)
+melted_cormat <- melt(cormat, na.rm = TRUE)
 # Create a ggheatmap
 ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
  geom_tile(color = "white")+
@@ -225,13 +204,13 @@ measuring the same thing in a area close to each other. They are
 visualized below.
 
 ``` r
-plot(power$Datetime,power$PowerConsumption_Zone2, type='l')
+plot(power$Datetime,power$PowerConsumption_Zone2, type='l', xlab="Month", ylab = "Power Consumption (Zone 2)")
 ```
 
 ![](Power_Consumption_Final_files/figure-gfm/eda-4-1.png)<!-- -->
 
 ``` r
-plot(power$Datetime,power$PowerConsumption_Zone3, type='l')
+plot(power$Datetime,power$PowerConsumption_Zone3, type='l', xlab="Month", ylab = "Power Consumption (Zone 3)")
 ```
 
 ![](Power_Consumption_Final_files/figure-gfm/eda-4-2.png)<!-- -->
@@ -346,20 +325,24 @@ model
 fc <- forecast(model, h=nrow(test))
 comp <- tbats.components(model)
 
+plot(comp)
+```
+
+![](Power_Consumption_Final_files/figure-gfm/tbats-1.png)<!-- -->
+
+``` r
 power %>%
   ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted")) + 
   coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
 ```
 
-    ## Warning: Removed 6 rows containing missing values (`geom_line()`).
-
-![](Power_Consumption_Final_files/figure-gfm/tbats-1.png)<!-- -->
+![](Power_Consumption_Final_files/figure-gfm/tbats-2.png)<!-- -->
 
 ``` r
 test %>%
@@ -367,15 +350,9 @@ test %>%
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted"))
-```
-
-![](Power_Consumption_Final_files/figure-gfm/tbats-2.png)<!-- -->
-
-``` r
-plot(comp)
 ```
 
 ![](Power_Consumption_Final_files/figure-gfm/tbats-3.png)<!-- -->
@@ -425,13 +402,11 @@ power %>%
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted")) + 
   coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
 ```
-
-    ## Warning: Removed 6 rows containing missing values (`geom_line()`).
 
 ![](Power_Consumption_Final_files/figure-gfm/sarima-1.png)<!-- -->
 
@@ -441,7 +416,7 @@ test %>%
   geom_line() +
   geom_line(data = test, mapping = 
               aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
-  scale_color_manual(name = "Group",
+  scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted"))
 ```
