@@ -2,7 +2,7 @@
 title: "Power Consumption Exploration and Forecasting"
 author: "Eva Burns"
 date: "`r Sys.Date()`"
-output: github_document
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE, dpi=300)
 
 ## Problem Statement
 
-A power consumption study in 2017 was done at Tétouan, Morocco by the Supervisory Control and Data Acquisition System (SCADA) of Amendis, who is in charge of the distribution of drinking water and electricity. Energy consumption is very important to the country, so the purpose of this project is to study and forecast power consumption in Tétouan. The energy distribution network is powered by 3 Zone stations: Quads, Smir and Boussafou. In this project, I will only focus on forecasting Zone 1's (Quads) power consumption.
+A power consumption study in 2017 was done at Tétouan, Morocco by the Supervisory Control and Data Acquisition System (SCADA) of Amendis, who is in charge of the distribution of drinking water and electricity. Energy consumption is very important to the country, so the purpose of this project is to study and forecast power consumption in Tétouan. The energy distribution network is powered by 3 Zone stations: Quads, Smir and Boussafou. In this project, I will only focus on forecasting Zone 1's (Quads) power consumption. I will be forecasting the last 20 days of December, 2017 starting on 12/11/2017
 
 The data was found from kaggle: [Electric Power Consumption](https://www.kaggle.com/datasets/fedesoriano/electric-power-consumption)
 
@@ -43,7 +43,7 @@ library(reshape2)
 
 ```{r import}
 power <- read.csv("data/powerconsumption.csv")
-idx <- which(power$Datetime %in% c('12/1/2017 0:00'))
+idx <- which(power$Datetime %in% c('12/11/2017 0:00'))
 
 power$Datetime <- as.POSIXct(power$Datetime, format = "%m/%d/%Y %H:%M")
 head(power, 3)
@@ -171,80 +171,140 @@ The periodogram says the seasonality with the highest frequency is `r seasonalit
 
 For this project, I will try two different models: TBATS and SARIMA. I will discuss how I chose these two models.
 
-```{r tbats, warning=FALSE}
+The main feature I wanted to include in a model to forecast the power consumption is seasonality, so I gravitated towards TBATS and SARIMA. TBATS has a lot of features that are spelled out in the name:
+
+**T**rigonometric regressors to model multiple-seasonalities
+
+**B**ox-Cox transformations
+
+**A**RMA errors
+
+**T**rend
+
+**S**easonality
+
+However, because it is a more complex model, there is risk of overfitting the train data, as well as the model itself being computationally expensive.
+
+SARIMA also handles seasonality, but is a simpler model. This will make the time to create the model faster, and may help with overfitting.
+
+I decided not to include dynamic regression (i.e. using any independent variables to predict power consumption) because the variables that are most correlated with power consumption (Zone 1) are the power consumptions of the other zones. Using those other zones does not make sense for the business case of forecasting power consumption because these models could also be used to forecast power consumption in zones 1 and 2.
+
+### TBATS
+
+I will first build the TBATS model using the train data (1/1/2017 00:00 - 12/10/2017 23:50) with a seasonal period of 144.
+
+```{r tbats-build, warning=FALSE}
 if (file.exists("tbats.rds")) {
-  model <- readRDS("tbats.rds")
+  tbats_model <- readRDS("tbats.rds")
 } else {
-  model <- tbats(train_ts, seasonal.periods = c(144))
-  saveRDS(model, "tbats.rds")
+  # build model if not done already
+  tbats_model <- tbats(train_ts, seasonal.periods = c(144))
+  saveRDS(tbats_model, "tbats.rds")
 }
 
-model
+tbats_model
 
-fc <- forecast(model, h=nrow(test))
-comp <- tbats.components(model)
-
+comp <- tbats.components(tbats_model)
 plot(comp)
-
-power %>%
-  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
-  geom_line() +
-  geom_line(data = test, mapping = 
-              aes(x = Datetime, y = fc$mean, color="Predicted")) +
-  scale_color_manual(name = "Data",
-  values = c( "Actual" = "black", "Predicted" = "red"),
-  labels = c("Actual", "Predicted")) + 
-  coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
-
-test %>%
-  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
-  geom_line() +
-  geom_line(data = test, mapping = 
-              aes(x = Datetime, y = fc$mean, color="Predicted")) +
-  scale_color_manual(name = "Data",
-  values = c( "Actual" = "black", "Predicted" = "red"),
-  labels = c("Actual", "Predicted"))
-
-acc <- data.frame(accuracy(fc, test$PowerConsumption_Zone1)[2,1:5])
-accuracy(fc, test$PowerConsumption_Zone1)
 ```
 
-```{r sarima, warning=FALSE}
+### SARIMA
+
+I will now build the SARIMA model using the train data (1/1/2017 00:00 - 12/10/2017 23:50) using `auto.arima` with a seasonal frequency of 144.
+
+```{r sarima-build, warning=FALSE}
 train_ts <- ts(train$PowerConsumption_Zone1, frequency = 144)
 
 if (file.exists("sarima.rds")) {
-  model_2 <- readRDS("sarima.rds")
+  sarima_model <- readRDS("sarima.rds")
 } else {
-  model_2 <- tbats(train_ts, seasonal.periods = c(144))
-  saveRDS(model_2, "sarima.rds")
+  # build model if not done already
+  sarima_model <- auto.arima(train_ts)
+  saveRDS(sarima_model, "sarima.rds")
 }
 
-model_2
-fc_2 <- forecast(model_2, h=nrow(test))
+sarima_model
+```
+## Results and Learnings
 
+### TBATS
 
-power %>%
+Using the built TBATS model, I will forecast Zone 1's power consumption from 12/11/2017 00:00 - 12/31/2017 23:50. This forecast is visualized below.
+
+```{r tbats-eval, warning=FALSE}
+fc_tbats <- forecast(tbats_model, h=nrow(test))
+
+tbat_plot_1 <- power %>%
   ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  ggtitle("TBATS Forecasted Power Consumption (Zone 1)") + 
   geom_line() +
   geom_line(data = test, mapping = 
-              aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
+              aes(x = Datetime, y = fc_tbats$mean, color="Predicted")) +
   scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted")) + 
   coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
 
-test %>%
+tbat_plot_2 <- test %>%
   ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  ggtitle("TBATS Forecasted Power Consumption (Zone 1) Zoomed In") + 
   geom_line() +
   geom_line(data = test, mapping = 
-              aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
+              aes(x = Datetime, y = fc_tbats$mean, color="Predicted")) +
   scale_color_manual(name = "Data",
   values = c( "Actual" = "black", "Predicted" = "red"),
   labels = c("Actual", "Predicted"))
 
-acc[2] <- accuracy(fc_2, test$PowerConsumption_Zone1)[2,1:5]
-accuracy(fc_2, test$PowerConsumption_Zone1)
+tbat_plot_1
+tbat_plot_2
 ```
+The accuracy of the model is evaluated using ME, RMSE, MAE, MPE, MAPE, and MASE.
+
+```{r tbats-eval-2}
+acc <- data.frame(accuracy(fc_tbats, test$PowerConsumption_Zone1)[2,1:5])
+accuracy(fc_tbats, test$PowerConsumption_Zone1)
+```
+
+### SARIMA
+
+Using the built SARIMA model, I will forecast Zone 1's power consumption from 12/11/2017 00:00 - 12/31/2017 23:50. This forecast is visualized below.
+
+```{r sarima-eval, warning=FALSE}
+fc_sarima <- forecast(sarima_model, h=nrow(test))
+
+sarima_plot_1 <- power %>%
+  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  ggtitle("SARIMA Forecasted Power Consumption (Zone 1)") + 
+  geom_line() +
+  geom_line(data = test, mapping = 
+              aes(x = Datetime, y = fc_sarima$mean, color="Predicted")) +
+  scale_color_manual(name = "Data",
+  values = c( "Actual" = "black", "Predicted" = "red"),
+  labels = c("Actual", "Predicted")) + 
+  coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
+
+sarima_plot_2 <- test %>%
+  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  ggtitle("SARIMA Forecasted Power Consumption (Zone 1) Zoomed In") + 
+  geom_line() +
+  geom_line(data = test, mapping = 
+              aes(x = Datetime, y = fc_sarima$mean, color="Predicted")) +
+  scale_color_manual(name = "Data",
+  values = c( "Actual" = "black", "Predicted" = "red"),
+  labels = c("Actual", "Predicted"))
+
+sarima_plot_1
+sarima_plot_2
+```
+
+The accuracy of the model is evaluated using ME, RMSE, MAE, MPE, MAPE, and MASE.
+
+```{r sarima-eval-2}
+acc[2] <- accuracy(fc_sarima, test$PowerConsumption_Zone1)[2,1:5]
+accuracy(fc_sarima, test$PowerConsumption_Zone1)
+```
+
+### Comparison
 
 ```{r compare}
 colnames(acc) <- c("TBATS", "SARIMA")
@@ -252,4 +312,10 @@ acc <- t(acc)
 acc
 ```
 
+TBATS performed better that SARIMA on all accuracy metrics for the train set (as in all metrics were closer to zero). For example the RMSE of TBATS was `r round(acc[1,2], 4)` compared to the RMSE of SARIMA which was `r round(acc[2,2], 4)`. It should be noted, though, that the accuracy of the training data on both models were about equal. This tells us that the SARIMA model is actually the one that overfit the training data.
 
+## Future Work
+
+While the TBATS model performed better to forecast the last two weeks of December, the current dataset ignores one of the main capabilities of the TBATS model: multiple seasonality. As stated earlier, I believe there is yearly seasonality to this data because of how weather changes throughout the year. However, this data is only for 2017, so yearly seasonality cannot be used on this project. If more data from multiple years were used, the TBATS model could be even more accurate than the others because it can handle both daily seasonality as well as the suspected yearly seasonality.
+
+In other words, in the future I believe that collecting more data for multiple years will yield an even more accurate TBATS model because it can be built on multiple seasonalities: daily and yearly.
