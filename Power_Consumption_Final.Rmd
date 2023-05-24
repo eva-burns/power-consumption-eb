@@ -1,0 +1,278 @@
+---
+title: "Power Consumption Exploration and Forecasting"
+author: "Eva Burns"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem Statement
+
+A power consumption study in 2017 was done at Tétouan, Morocco by the Supervisory Control and Data Acquisition System (SCADA) of Amendis, who is in charge of the distribution of drinking water and electricity. Energy consumption is very important to the country, so the purpose of this project is to study and forecast power consumption in Tétouan. The energy distribution network is powered by 3 Zone stations: Quads, Smir and Boussafou. In this project, I will only focus on forecasting Zone 1's (Quads) power consumption.
+
+The data was found from kaggle: [Electric Power Consumption](https://www.kaggle.com/datasets/fedesoriano/electric-power-consumption)
+
+## Assumptions/Hypotheses about Data and Modeling
+
+The data was collected every ten minutes for exactly one year (1/1/2017 0:00 - 12/30/2017 23:50) with nine columns:
+
+- `Datetime`: Time window of ten minutes.
+- `Temperature`: Weather Temperature.
+- `Humidity`: Weather Humidity.
+- `WindSpeed`: Wind Speed.
+- `GeneralDiffuseFlows`: “Diffuse flow” is a catchall term to describe low-temperature (< 0.2° to ~ 100°C) fluids that slowly discharge through sulfide mounds, fractured lava flows, and assemblages of bacterial mats and macrofauna.
+- `Diffuse Flows`
+- **`PowerConsumption_Zone1`**: This is what will be forecasted
+- `PowerConsumption_Zone2`
+- `PowerConsumption_Zone3`
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(forecast)
+library(xts)
+library(TSA)
+library(tidyquant)
+library(tseries)
+library(lmtest)
+library(car)
+library(reshape2)
+```
+
+```{r import}
+power <- read.csv("data/powerconsumption.csv")
+idx <- which(power$Datetime %in% c('12/1/2017 0:00'))
+
+power$Datetime <- as.POSIXct(power$Datetime, format = "%m/%d/%Y %H:%M")
+head(power, 3)
+
+train <- power[1:(idx - 1),]
+test <- power[idx:nrow(power),]
+
+train_ts <- ts(train$PowerConsumption_Zone1)
+```
+
+Some assumptions about the data collected is that the data was collected when it is said to be collected. That is, it was collected every ten minutes a day. Also, that the sensors were calibrated correctly throughout the year.
+
+I hypothesize that a model with a seasonal component will be most appropriate. I believe there might be two seasonalities: daily and yearly. Throughout the day, power consumption changes. For example, when you are sleeping, power consumption is lower because you are not using appliances or lights around your house. I also think power consumption changes yearly as weather changes during the seasons, affecting AC/heating consumption. However, since this data only covers one year, yearly seasonality will not be able to be used.
+
+## Data properties
+
+```{r properties-1}
+hist(train$PowerConsumption_Zone1)
+```
+
+The distribution of the power consumption in Zone 1 does not seem to be normally distributed, but it looks to be somewhat symmetrical.
+
+```{r properties-2, warning=FALSE}
+acf(ts(train$PowerConsumption_Zone1), xlab = "lag #", ylab = 'ACF',main=' ')
+adf.test(ts(train$PowerConsumption_Zone1))
+kpss.test(ts(train$PowerConsumption_Zone1))
+```
+While the Augmented Dickey-Fuller test gives a low p-value (0.01), concluding that the data is stationary, the ACF plot and KPSS indicate the data is non-stationary since the KPSS p-value is 0.01 (non-stationary) and the ACF plot does not die down quickly.
+
+```{r properties-3}
+durbinWatsonTest(train$PowerConsumption_Zone1)
+```
+
+The Durbin-Watson test indicates that the power consumption in Zone 1 is positively autocorrelated because the test statistic is close to 0.
+
+## Exploratory Data Analysis
+
+Below is the time series plot of the power consumption in Zone 1 for 2017.
+```{r eda}
+plot(power$Datetime,power$PowerConsumption_Zone1, type='l', xlab="Month", ylab = "Power Consumption (Zone 1)")
+```
+
+Here is the plot zoomed in on what will be forecasted. It seems that there is daily seasonality. This will be confirmed later. 
+
+```{r eda-2}
+plot(test$Datetime,test$PowerConsumption_Zone1, type='l', xlab="Date", ylab = "Power Consumption (Zone 1)")
+```
+
+Let's look at how the other features of this dataset correlate to the power consumption in Zone 1.
+
+```{r eda-3}
+cormat <- round(cor(power[c('PowerConsumption_Zone1', 'Temperature', 'Humidity', 'WindSpeed', 'GeneralDiffuseFlows', 'DiffuseFlows', 'PowerConsumption_Zone2', 'PowerConsumption_Zone3')]),2)
+
+# Get lower triangle of the correlation matrix
+get_lower_tri<-function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+  # Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
+
+reorder_cormat <- function(cormat){
+# Use correlation between variables as distance
+dd <- as.dist((1-cormat)/2)
+hc <- hclust(dd)
+cormat <-cormat[hc$order, hc$order]
+}
+
+# Reorder the correlation matrix
+cormat <- reorder_cormat(cormat)
+upper_tri <- cormat
+# Melt the correlation matrix
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Create a ggheatmap
+ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Pearson\nCorrelation") +
+  theme_minimal()+ # minimal theme
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+
+ggheatmap + 
+geom_text(aes(Var2, Var1, label = value), color = "black", size = 4) +
+theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.position = c(1.35, 0.1),
+  legend.direction = "vertical")+
+  guides(fill = guide_colorbar(barwidth = 1, barheight = 7,
+                title.position = "top", title.hjust = 0.5))
+```
+
+The power consumption in Zones 2 and 3 are the most correlated with power consumption in Zones 1. This makes sense because they are measuring the same thing in a area close to each other. They are visualized below.
+
+```{r eda-4}
+plot(power$Datetime,power$PowerConsumption_Zone2, type='l')
+plot(power$Datetime,power$PowerConsumption_Zone3, type='l')
+```
+
+## Data processing
+
+Outliers/Anomalies were checked using `tsoutliers`. 
+
+```{r anomaly}
+tsoutliers(train$PowerConsumption_Zone1)
+```
+
+There were no outliers found, so no data needs to be removed or replaced. 
+
+```{r NA}
+sum(is.na(power$PowerConsumption_Zone1))
+```
+
+The data is full and collected at regular intervals with no null values, so no cleaning or transformations are required.
+
+## Feature Engineering
+
+Since I suspect that there is a seasonal component to the data, I will apply a frequency periodogram to `PowerConsumption_Zone1` to determine if/what the seasonal period is.
+
+```{r frequency}
+p <- periodogram(train_ts)
+```
+
+The periodogram indicates that there seems to be a seasonal component to the data. I will calculate the period of seasonality.
+
+```{r frequency-2}
+max_freq <- p$freq[which.max(p$spec)]
+seasonality <- 1/max_freq
+seasonality
+```
+
+The periodogram says the seasonality with the highest frequency is `r seasonality`. This indicates there is daily seasonality because the data is collected in 10 minute increments. There are 1440 minutes in a day, which divided by 10 minutes is 144.
+
+## Proposed Approaches
+
+For this project, I will try two different models: TBATS and SARIMA. I will discuss how I chose these two models.
+
+
+
+```{r tbats}
+if (file.exists("tbats.rds")) {
+  model <- readRDS("tbats.rds")
+} else {
+  model <- tbats(train_ts, seasonal.periods = c(144))
+  saveRDS(model, "tbats.rds")
+}
+
+model
+
+fc <- forecast(model, h=nrow(test))
+comp <- tbats.components(model)
+
+power %>%
+  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  geom_line() +
+  geom_line(data = test, mapping = 
+              aes(x = Datetime, y = fc$mean, color="Predicted")) +
+  scale_color_manual(name = "Group",
+  values = c( "Actual" = "black", "Predicted" = "red"),
+  labels = c("Actual", "Predicted")) + 
+  coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
+
+test %>%
+  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  geom_line() +
+  geom_line(data = test, mapping = 
+              aes(x = Datetime, y = fc$mean, color="Predicted")) +
+  scale_color_manual(name = "Group",
+  values = c( "Actual" = "black", "Predicted" = "red"),
+  labels = c("Actual", "Predicted"))
+
+plot(comp)
+
+acc <- data.frame(accuracy(fc, test$PowerConsumption_Zone1)[2,1:5])
+accuracy(fc, test$PowerConsumption_Zone1)
+```
+
+```{r sarima}
+train_ts <- ts(train$PowerConsumption_Zone1, frequency = 144)
+
+if (file.exists("sarima.rds")) {
+  model_2 <- readRDS("sarima.rds")
+} else {
+  model_2 <- tbats(train_ts, seasonal.periods = c(144))
+  saveRDS(model_2, "sarima.rds")
+}
+
+model_2
+fc_2 <- forecast(model_2, h=nrow(test))
+
+
+power %>%
+  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  geom_line() +
+  geom_line(data = test, mapping = 
+              aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
+  scale_color_manual(name = "Group",
+  values = c( "Actual" = "black", "Predicted" = "red"),
+  labels = c("Actual", "Predicted")) + 
+  coord_x_datetime(xlim = c("2017-10-01 00:00:00", "2017-12-30 23:50:00"))
+
+test %>%
+  ggplot(aes(x = Datetime, y = PowerConsumption_Zone1, color='Actual')) +
+  geom_line() +
+  geom_line(data = test, mapping = 
+              aes(x = Datetime, y = fc_2$mean, color="Predicted")) +
+  scale_color_manual(name = "Group",
+  values = c( "Actual" = "black", "Predicted" = "red"),
+  labels = c("Actual", "Predicted"))
+
+acc[2] <- accuracy(fc_2, test$PowerConsumption_Zone1)[2,1:5]
+accuracy(fc_2, test$PowerConsumption_Zone1)
+```
+
+```{r compare}
+colnames(acc) <- c("TBATS", "SARIMA")
+acc <- t(acc)
+acc
+```
+
+
