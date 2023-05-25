@@ -516,7 +516,7 @@ acc
     ## TBATS   674.9799 1491.037 1156.175 1.957271 3.908741
     ## SARIMA 1638.8355 2377.233 1802.432 5.495135 6.143936
 
-TBATS performed better that SARIMA on all accuracy metrics for the train
+TBATS performed better that SARIMA on all accuracy metrics for the test
 set (as in all metrics were closer to zero). For example the RMSE of
 TBATS was 1491.0374 compared to the RMSE of SARIMA which was 2377.2326.
 It should be noted, though, that the accuracy of the training data on

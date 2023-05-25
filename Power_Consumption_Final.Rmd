@@ -2,7 +2,7 @@
 title: "Power Consumption Exploration and Forecasting"
 author: "Eva Burns"
 date: "`r Sys.Date()`"
-output: github_document
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -312,7 +312,7 @@ acc <- t(acc)
 acc
 ```
 
-TBATS performed better that SARIMA on all accuracy metrics for the train set (as in all metrics were closer to zero). For example the RMSE of TBATS was `r round(acc[1,2], 4)` compared to the RMSE of SARIMA which was `r round(acc[2,2], 4)`. It should be noted, though, that the accuracy of the training data on both models were about equal. This tells us that the SARIMA model is actually the one that overfit the training data.
+TBATS performed better that SARIMA on all accuracy metrics for the test set (as in all metrics were closer to zero). For example the RMSE of TBATS was `r round(acc[1,2], 4)` compared to the RMSE of SARIMA which was `r round(acc[2,2], 4)`. It should be noted, though, that the accuracy of the training data on both models were about equal. This tells us that the SARIMA model is actually the one that overfit the training data.
 
 ## Future Work
 
